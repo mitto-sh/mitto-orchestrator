@@ -15,6 +15,7 @@ vi.mock('@/config/env', () => ({
     NODE_ENV: 'test',
     PORT: 3003,
     DEPLOY_MODE: 'docker',
+    DEPLOY_HOST: 'localhost',
     HEALTHCHECK_TIMEOUT_MS: 30,
     HEALTHCHECK_INTERVAL_MS: 5,
     REDIS_URL: 'redis://localhost:6379',

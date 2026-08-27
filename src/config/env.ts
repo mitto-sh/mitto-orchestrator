@@ -7,6 +7,8 @@ const envSchema = z.object({
 
   DEPLOY_MODE: z.enum(['docker', 'swarm', 'kubernetes', 'aws-terraform']).default('docker'),
 
+  DEPLOY_HOST: z.string().default('localhost'),
+
   HEALTHCHECK_TIMEOUT_MS: z.coerce.number().default(30000),
   HEALTHCHECK_INTERVAL_MS: z.coerce.number().default(1000),
 

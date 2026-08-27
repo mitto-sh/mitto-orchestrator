@@ -73,7 +73,7 @@ async function deploy(req: DeployRequest): Promise<DeployResult> {
 
   const info = await container.inspect()
   const hostPort = Number(info.NetworkSettings.Ports[`${req.port}/tcp`]?.[0]?.HostPort)
-  const deployUrl = `http://localhost:${hostPort}`
+  const deployUrl = `http://${env.DEPLOY_HOST}:${hostPort}`
 
   const healthy = await waitForHealthy(deployUrl, req.healthCheck)
   if (!healthy) {
