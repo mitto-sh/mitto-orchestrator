@@ -36,12 +36,13 @@ async function waitForHealthy(deployUrl: string, healthCheck: string): Promise<b
 
 async function deploy(req: DeployRequest): Promise<DeployResult> {
   const name = containerName(req.serviceId, req.environmentId)
-  await removeExisting(name)
+  const candidateName = `${name}-candidate`
+  await removeExisting(candidateName)
 
   const isWeb = req.serviceType === 'web' && req.port !== null
 
   const container = await docker.createContainer({
-    name,
+    name: candidateName,
     Image: req.imageTag,
     Env: Object.entries(req.envVars).map(([key, value]) => `${key}=${value}`),
     ExposedPorts: isWeb ? { [`${req.port}/tcp`]: {} } : undefined,
@@ -60,6 +61,8 @@ async function deploy(req: DeployRequest): Promise<DeployResult> {
       await container.remove({ force: true })
       throw new AppError(502, `Container for service ${req.serviceId} exited immediately after start`)
     }
+    await removeExisting(name)
+    await container.rename({ name })
     return { deployUrl: null, containerId: container.id, hostPort: null }
   }
 
@@ -73,6 +76,9 @@ async function deploy(req: DeployRequest): Promise<DeployResult> {
     await container.remove({ force: true }).catch(() => {})
     throw new AppError(502, `Health check ${req.healthCheck} did not pass within ${env.HEALTHCHECK_TIMEOUT_MS}ms`)
   }
+
+  await removeExisting(name)
+  await container.rename({ name })
 
   return { deployUrl, containerId: container.id, hostPort }
 }

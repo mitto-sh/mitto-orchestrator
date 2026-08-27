@@ -39,12 +39,13 @@ beforeEach(() => {
 })
 
 describe('dockerDriver.deploy', () => {
-  it('deploys a web service: replaces no existing container, allocates a dynamic host port, and waits out a failed health-check attempt before success', async () => {
+  it('deploys a web service: builds under a candidate name, allocates a dynamic host port, waits out a failed health-check attempt, then renames to the canonical name', async () => {
     const start = vi.fn().mockResolvedValue(undefined)
+    const rename = vi.fn().mockResolvedValue(undefined)
     const inspect = vi.fn().mockResolvedValue({
       NetworkSettings: { Ports: { '3000/tcp': [{ HostPort: '32768' }] } },
     })
-    createContainer.mockResolvedValue({ id: 'new-container-id', start, inspect })
+    createContainer.mockResolvedValue({ id: 'new-container-id', start, inspect, rename })
 
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error('ECONNREFUSED'))
@@ -59,22 +60,26 @@ describe('dockerDriver.deploy', () => {
 
     expect(createContainer).toHaveBeenCalledWith(expect.objectContaining({
       Image: 'mitto-s1:abc123',
-      name: 'mitto-s1-e1',
+      name: 'mitto-s1-e1-candidate',
       Env: ['FOO=bar'],
     }))
     expect(start).toHaveBeenCalled()
+    expect(rename).toHaveBeenCalledWith({ name: 'mitto-s1-e1' })
     expect(result).toEqual({ deployUrl: 'http://localhost:32768', containerId: 'new-container-id', hostPort: 32768 })
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('stops and removes an existing container for the same service+environment before creating a new one', async () => {
+  it('stops and removes an existing container for the same service+environment, but only after the new one is confirmed healthy', async () => {
     const stop = vi.fn().mockResolvedValue(undefined)
     const remove = vi.fn().mockResolvedValue(undefined)
-    getContainer.mockReturnValue(existingContainer(stop, remove))
+    getContainer.mockImplementation((queriedName: string) =>
+      queriedName === 'mitto-s1-e1' ? existingContainer(stop, remove) : noExistingContainer(),
+    )
 
     const start = vi.fn().mockResolvedValue(undefined)
+    const rename = vi.fn().mockResolvedValue(undefined)
     const inspect = vi.fn().mockResolvedValue({ State: { Running: true } })
-    createContainer.mockResolvedValue({ id: 'new-id', start, inspect })
+    createContainer.mockResolvedValue({ id: 'new-id', start, inspect, rename })
 
     await dockerDriver.deploy({
       deploymentId: 'd1', serviceId: 's1', environmentId: 'e1',
@@ -85,12 +90,14 @@ describe('dockerDriver.deploy', () => {
     expect(getContainer).toHaveBeenCalledWith('mitto-s1-e1')
     expect(stop).toHaveBeenCalled()
     expect(remove).toHaveBeenCalled()
+    expect(rename).toHaveBeenCalledWith({ name: 'mitto-s1-e1' })
   })
 
   it('deploys a non-web service without allocating a port or polling health checks', async () => {
     const start = vi.fn().mockResolvedValue(undefined)
+    const rename = vi.fn().mockResolvedValue(undefined)
     const inspect = vi.fn().mockResolvedValue({ State: { Running: true } })
-    createContainer.mockResolvedValue({ id: 'worker-id', start, inspect })
+    createContainer.mockResolvedValue({ id: 'worker-id', start, inspect, rename })
 
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -105,7 +112,13 @@ describe('dockerDriver.deploy', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('throws and cleans up the container when the health check never passes', async () => {
+  it('throws and cleans up the candidate when the health check never passes, leaving an existing container running (rollback)', async () => {
+    const oldStop = vi.fn()
+    const oldRemove = vi.fn()
+    getContainer.mockImplementation((queriedName: string) =>
+      queriedName === 'mitto-s1-e1' ? existingContainer(oldStop, oldRemove) : noExistingContainer(),
+    )
+
     const stop = vi.fn().mockResolvedValue(undefined)
     const remove = vi.fn().mockResolvedValue(undefined)
     const start = vi.fn().mockResolvedValue(undefined)
@@ -122,11 +135,20 @@ describe('dockerDriver.deploy', () => {
       envVars: {}, serviceType: 'web',
     })).rejects.toThrow(AppError)
 
+    expect(createContainer).toHaveBeenCalledWith(expect.objectContaining({ name: 'mitto-s1-e1-candidate' }))
     expect(stop).toHaveBeenCalled()
     expect(remove).toHaveBeenCalled()
+    expect(oldStop).not.toHaveBeenCalled()
+    expect(oldRemove).not.toHaveBeenCalled()
   })
 
-  it('throws when a non-web container exits immediately after start', async () => {
+  it('throws when a non-web container exits immediately after start, leaving an existing container running (rollback)', async () => {
+    const oldStop = vi.fn()
+    const oldRemove = vi.fn()
+    getContainer.mockImplementation((queriedName: string) =>
+      queriedName === 'mitto-s1-e1' ? existingContainer(oldStop, oldRemove) : noExistingContainer(),
+    )
+
     const start = vi.fn().mockResolvedValue(undefined)
     const inspect = vi.fn().mockResolvedValue({ State: { Running: false } })
     const remove = vi.fn().mockResolvedValue(undefined)
@@ -139,6 +161,8 @@ describe('dockerDriver.deploy', () => {
     })).rejects.toThrow('exited immediately after start')
 
     expect(remove).toHaveBeenCalled()
+    expect(oldStop).not.toHaveBeenCalled()
+    expect(oldRemove).not.toHaveBeenCalled()
   })
 })
 
