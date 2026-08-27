@@ -1,5 +1,8 @@
 import { docker } from '@/lib/docker'
 import { containerName } from '@/docker/containerName'
+import { tailLogs } from '@/docker/tailLogs'
+import { publisher } from '@/lib/redis'
+import { runtimeLogsChannel } from 'mitto-lib-redis'
 import { env } from '@/config/env'
 import { AppError } from '@/middleware/error'
 import type { DeployDriver, DeployRequest, DeployResult } from '@/drivers/DeployDriver'
@@ -63,6 +66,8 @@ async function deploy(req: DeployRequest): Promise<DeployResult> {
     }
     await removeExisting(name)
     await container.rename({ name })
+    const channel = runtimeLogsChannel(req.deploymentId)
+    tailLogs(container.id, (line) => { publisher.publish(channel, line).catch(() => {}) })
     return { deployUrl: null, containerId: container.id, hostPort: null }
   }
 
@@ -79,6 +84,8 @@ async function deploy(req: DeployRequest): Promise<DeployResult> {
 
   await removeExisting(name)
   await container.rename({ name })
+  const channel = runtimeLogsChannel(req.deploymentId)
+  tailLogs(container.id, (line) => { publisher.publish(channel, line).catch(() => {}) })
 
   return { deployUrl, containerId: container.id, hostPort }
 }

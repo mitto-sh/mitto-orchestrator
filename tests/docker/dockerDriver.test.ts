@@ -17,8 +17,15 @@ vi.mock('@/config/env', () => ({
     DEPLOY_MODE: 'docker',
     HEALTHCHECK_TIMEOUT_MS: 30,
     HEALTHCHECK_INTERVAL_MS: 5,
+    REDIS_URL: 'redis://localhost:6379',
   },
 }))
+
+const tailLogs = vi.fn()
+vi.mock('@/docker/tailLogs', () => ({ tailLogs: (...args: unknown[]) => tailLogs(...args) }))
+
+const publish = vi.fn()
+vi.mock('@/lib/redis', () => ({ publisher: { publish: (...args: unknown[]) => publish(...args) } }))
 
 const { dockerDriver } = await import('@/docker/dockerDriver')
 const { AppError } = await import('@/middleware/error')
@@ -34,8 +41,11 @@ function existingContainer(stop = vi.fn().mockResolvedValue(undefined), remove =
 beforeEach(() => {
   getContainer.mockReset()
   createContainer.mockReset()
+  tailLogs.mockReset()
+  publish.mockReset()
   vi.restoreAllMocks()
   getContainer.mockReturnValue(noExistingContainer())
+  publish.mockResolvedValue(undefined)
 })
 
 describe('dockerDriver.deploy', () => {
@@ -67,6 +77,11 @@ describe('dockerDriver.deploy', () => {
     expect(rename).toHaveBeenCalledWith({ name: 'mitto-s1-e1' })
     expect(result).toEqual({ deployUrl: 'http://localhost:32768', containerId: 'new-container-id', hostPort: 32768 })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(tailLogs).toHaveBeenCalledWith('new-container-id', expect.any(Function))
+
+    const onLine = tailLogs.mock.calls[0][1]
+    onLine('Server listening on 3000')
+    expect(publish).toHaveBeenCalledWith('logs:runtime:d1', 'Server listening on 3000')
   })
 
   it('stops and removes an existing container for the same service+environment, but only after the new one is confirmed healthy', async () => {

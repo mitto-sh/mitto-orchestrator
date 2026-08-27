@@ -9,6 +9,8 @@ const envSchema = z.object({
 
   HEALTHCHECK_TIMEOUT_MS: z.coerce.number().default(30000),
   HEALTHCHECK_INTERVAL_MS: z.coerce.number().default(1000),
+
+  REDIS_URL: z.string().default('redis://localhost:6379'),
 })
 
 const parsed = envSchema.safeParse(process.env)
